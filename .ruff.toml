@@ -1,0 +1,9 @@
+target-version = "py39"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[lint.per-file-ignores]
+# Test fixtures are verbatim PHP-FPM log lines.
+"lambda/test_*.py" = ["E501"]
