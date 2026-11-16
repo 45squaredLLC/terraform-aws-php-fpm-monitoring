@@ -209,12 +209,17 @@ FULL_BORCHERS = "[13-Nov-2026 01:30:40] WARNING: [pool borchers] server reached 
 
 
 def test_pool_full_names_banned_ips():
-    fake, logs = FakeSNS(), FakeBanLogs([
-        "2026-11-13 01:30:30,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Ban 34.95.143.122",
-        "2026-11-13 01:30:31,100 fail2ban.actions [8]: NOTICE  [recidive] Ban 34.95.143.122",
-        "2026-11-13 01:30:32,100 fail2ban.actions [8]: NOTICE  [45sq-php-slow] Ban 2001:db8::7",
-        "2026-11-13 01:30:33,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Unban 9.9.9.9",
-    ])
+    fake, logs = (
+        FakeSNS(),
+        FakeBanLogs(
+            [
+                "2026-11-13 01:30:30,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Ban 34.95.143.122",
+                "2026-11-13 01:30:31,100 fail2ban.actions [8]: NOTICE  [recidive] Ban 34.95.143.122",
+                "2026-11-13 01:30:32,100 fail2ban.actions [8]: NOTICE  [45sq-php-slow] Ban 2001:db8::7",
+                "2026-11-13 01:30:33,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Unban 9.9.9.9",
+            ]
+        ),
+    )
     n._clients["sns"], n._clients["logs"] = fake, logs
     n.BAN_LOG_GROUP = "/php-fpm/fail2ban"
     try:
@@ -225,8 +230,13 @@ def test_pool_full_names_banned_ips():
     msg = json.loads(fake.sent[0]["Message"])["content"]
     assert msg["title"].endswith("(pool borchers, 6 workers): 2 IPs auto-banned")
     assert "`34.95.143.122` (45sq-php-burst, recidive)" in msg["description"]
-    assert "`2001:db8::7` (45sq-php-slow)" in msg["description"] and "9.9.9.9" not in msg["description"]
-    assert logs.kw["logStreamNames"] == ["i-0abc"] and logs.kw["logGroupName"] == "/php-fpm/fail2ban"
+    assert (
+        "`2001:db8::7` (45sq-php-slow)" in msg["description"]
+        and "9.9.9.9" not in msg["description"]
+    )
+    assert (
+        logs.kw["logStreamNames"] == ["i-0abc"] and logs.kw["logGroupName"] == "/php-fpm/fail2ban"
+    )
 
 
 def test_ban_context_off_or_failing_never_blocks_alert():
