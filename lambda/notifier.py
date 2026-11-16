@@ -229,7 +229,10 @@ def ban_line(bans: list[tuple[str, str]] | None) -> str:
         return f"No IP was auto-banned on this server in the last {mins} min."
     shown = ", ".join(f"`{ip}` ({jail})" for ip, jail in bans[:8])
     more = f" and {len(bans) - 8} more" if len(bans) > 8 else ""
-    return f"Auto-banned in the last {mins} min: {shown}{more}. Requests from these IPs are now dropped."
+    return (
+        f"Auto-banned in the last {mins} min: {shown}{more}. "
+        "Requests from these IPs are now dropped."
+    )
 
 
 def render(server: str, stream: str, groups: list[dict]) -> tuple[str, str]:
