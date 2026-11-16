@@ -193,3 +193,53 @@ def test_old_entries_are_history_not_news():
     old_slow = ENTRY.replace("01:30:12", "00:47:40")
     assert n.lambda_handler(_event([old_slow]), None)["posted"] == 0
     assert fake.sent == []
+
+
+class FakeBanLogs:
+    def __init__(self, messages):
+        self.messages = messages
+        self.kw = None
+
+    def filter_log_events(self, **kw):
+        self.kw = kw
+        return {"events": [{"message": m} for m in self.messages]}
+
+
+FULL_BORCHERS = "[13-Nov-2026 01:30:40] WARNING: [pool borchers] server reached pm.max_children setting (6), consider raising it"
+
+
+def test_pool_full_names_banned_ips():
+    fake, logs = FakeSNS(), FakeBanLogs([
+        "2026-11-13 01:30:30,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Ban 34.95.143.122",
+        "2026-11-13 01:30:31,100 fail2ban.actions [8]: NOTICE  [recidive] Ban 34.95.143.122",
+        "2026-11-13 01:30:32,100 fail2ban.actions [8]: NOTICE  [45sq-php-slow] Ban 2001:db8::7",
+        "2026-11-13 01:30:33,100 fail2ban.actions [8]: NOTICE  [45sq-php-burst] Unban 9.9.9.9",
+    ])
+    n._clients["sns"], n._clients["logs"] = fake, logs
+    n.BAN_LOG_GROUP = "/php-fpm/fail2ban"
+    try:
+        out = n.lambda_handler(_event([FULL_BORCHERS], group="/php-fpm/error"), None)
+    finally:
+        n.BAN_LOG_GROUP = ""
+    assert out["posted"] == 1
+    msg = json.loads(fake.sent[0]["Message"])["content"]
+    assert msg["title"].endswith("(pool borchers, 6 workers): 2 IPs auto-banned")
+    assert "`34.95.143.122` (45sq-php-burst, recidive)" in msg["description"]
+    assert "`2001:db8::7` (45sq-php-slow)" in msg["description"] and "9.9.9.9" not in msg["description"]
+    assert logs.kw["logStreamNames"] == ["i-0abc"] and logs.kw["logGroupName"] == "/php-fpm/fail2ban"
+
+
+def test_ban_context_off_or_failing_never_blocks_alert():
+    assert n.recent_bans("i-0abc", NOW) is None and n.ban_line(None) == ""
+
+    class Boom:
+        def filter_log_events(self, **kw):
+            raise RuntimeError("throttled")
+
+    n._clients["logs"] = Boom()
+    n.BAN_LOG_GROUP = "/php-fpm/fail2ban"
+    try:
+        assert n.recent_bans("i-0abc", NOW) is None
+        assert "No IP was auto-banned" in n.ban_line([])
+    finally:
+        n.BAN_LOG_GROUP = ""

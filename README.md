@@ -23,6 +23,10 @@ the pool hit `pm.max_children`. This module gets both into Slack.
 
 Repeats of the same site + frame (or a full pool) are held back for `quiet_minutes`.
 
+With `ship_fail2ban = true`, each alert also says which IPs fail2ban banned on that
+server in the last few minutes, e.g. *PHP pool full on ClientServer (pool borchers,
+6 workers): 1 IP auto-banned*, so a bot burst reads as handled rather than as an outage.
+
 ```
 PHP-FPM slow log ─┐  CloudWatch agent       ┌▶ subscription "script_filename" ─┐
 PHP-FPM error log ┴─(SSM-installed)──▶ logs ┴▶ subscription "reached pm.max_children" ┴▶ Lambda ─▶ SNS (Amazon Q) and/or Slack webhook
@@ -78,6 +82,9 @@ module "php_fpm_monitoring" {
 | `quiet_minutes` | `30` | Hold back repeats this long |
 | `digest_schedule` | `cron(0 13 * * ? *)` | `null` turns the digest off |
 | `digest_hours` | `24` | Window the digest covers |
+| `ship_fail2ban` | `false` | Also ship fail2ban's log to `/<prefix>/fail2ban`; alerts then name the IPs fail2ban banned on that server |
+| `fail2ban_log_path` | `/var/log/fail2ban.log` | fail2ban's log on the servers |
+| `ban_window_seconds` | `300` | How far back an alert looks for bans |
 | `log_retention_days` | `30` | All log groups |
 | `tags` | `{}` | |
 

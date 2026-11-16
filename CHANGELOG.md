@@ -3,6 +3,15 @@
 All notable changes to this module are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-16
+
+- `ship_fail2ban` (default `false`): the agent also ships fail2ban's log
+  (`fail2ban_log_path`) to `/<prefix>/fail2ban`, one stream per instance, and every
+  slow-request and pool-full alert names the IPs fail2ban banned on that server in
+  the last `ban_window_seconds` (300). A pool-full title gains ": N IPs auto-banned".
+  The lookup is best-effort: if it fails, the alert still goes out unchanged.
+- Off by default, so existing callers see no change.
+
 ## [1.0.0] - 2026-11-13
 
 First release.

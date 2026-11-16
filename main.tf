@@ -8,6 +8,7 @@ data "aws_caller_identity" "current" {}
 locals {
   slow_log_group  = "/${var.name_prefix}/slow"
   error_log_group = "/${var.name_prefix}/error"
+  ban_log_group   = "/${var.name_prefix}/fail2ban"
 
   servers = {
     for k, s in var.servers : k => merge(s, {
@@ -36,6 +37,11 @@ locals {
               log_group_name  = local.error_log_group
               log_stream_name = "{instance_id}"
             }],
+            var.ship_fail2ban ? [{
+              file_path       = var.fail2ban_log_path
+              log_group_name  = local.ban_log_group
+              log_stream_name = "{instance_id}"
+            }] : [],
           )
         }
       }
@@ -55,6 +61,14 @@ resource "aws_cloudwatch_log_group" "error" {
   tags              = var.tags
 }
 
+resource "aws_cloudwatch_log_group" "fail2ban" {
+  count = var.ship_fail2ban ? 1 : 0
+
+  name              = local.ban_log_group
+  retention_in_days = var.log_retention_days
+  tags              = var.tags
+}
+
 resource "aws_iam_role_policy" "instance_logs" {
   for_each = toset(var.instance_role_names)
 
@@ -67,10 +81,13 @@ resource "aws_iam_role_policy" "instance_logs" {
       Sid    = "ShipPhpFpmLogs"
       Effect = "Allow"
       Action = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
-      Resource = [
-        aws_cloudwatch_log_group.slow.arn, "${aws_cloudwatch_log_group.slow.arn}:*",
-        aws_cloudwatch_log_group.error.arn, "${aws_cloudwatch_log_group.error.arn}:*",
-      ]
+      Resource = concat(
+        [
+          aws_cloudwatch_log_group.slow.arn, "${aws_cloudwatch_log_group.slow.arn}:*",
+          aws_cloudwatch_log_group.error.arn, "${aws_cloudwatch_log_group.error.arn}:*",
+        ],
+        var.ship_fail2ban ? [aws_cloudwatch_log_group.fail2ban[0].arn, "${aws_cloudwatch_log_group.fail2ban[0].arn}:*"] : [],
+      )
     }]
   })
 }
