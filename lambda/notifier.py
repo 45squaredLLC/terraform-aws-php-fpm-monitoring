@@ -11,6 +11,10 @@ Two entry points, one function:
 * Pool full. A second subscription, on the PHP-FPM error log and filtered to
   "reached pm.max_children", posts once per QUIET_MINUTES per server when every
   worker is busy: the warning that comes minutes before sites time out.
+* Ban context (optional). With BAN_LOG_GROUP set (the module's ship_fail2ban),
+  every alert looks up that server's fail2ban bans from the last
+  BAN_WINDOW_SECONDS and names them, so "pool full" reads as "bot X, banned"
+  rather than a wall of stack traces.
 * Digest. An EventBridge schedule invokes it with {"mode": "digest"}. It runs a
   CloudWatch Logs Insights query over the last DIGEST_HOURS and posts the
   slowest sites, or nothing if there were none.
@@ -47,6 +51,8 @@ MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", "15"))
 SLOW_SECONDS = os.environ.get("SLOW_SECONDS", "10")
 SLOW_LOG_GROUP = os.environ.get("SLOW_LOG_GROUP", "")
 FPM_LOG_GROUP = os.environ.get("FPM_LOG_GROUP", "")
+BAN_LOG_GROUP = os.environ.get("BAN_LOG_GROUP", "")
+BAN_WINDOW_SECONDS = int(os.environ.get("BAN_WINDOW_SECONDS", "300"))
 DIGEST_HOURS = int(os.environ.get("DIGEST_HOURS", "24"))
 SERVER_NAMES: dict[str, str] = json.loads(os.environ.get("SERVER_NAMES", "{}"))
 REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -63,6 +69,7 @@ _FULL = re.compile(
     r"^\[(?P<ts>[^\]]+)\]\s+WARNING:\s+\[pool (?P<pool>[^\]]+)\] "
     r"server reached pm\.max_children setting \((?P<n>\d+)\)"
 )
+_BAN = re.compile(r"\[(?P<jail>[^\]]+)\]\s+(?:Restore )?Ban (?P<ip>[0-9A-Fa-f:.]+)")
 _SITE = re.compile(r"^/var/www/(?:html/)?(?P<site>[^/]+)/")
 
 DIGEST_QUERY = r"""fields @message, @logStream
@@ -189,6 +196,45 @@ def logs_link(log_group: str, stream: str, needle: str) -> str:
     return f"https://{REGION}.console.aws.amazon.com/cloudwatch/home?region={REGION}#{frag}"
 
 
+def recent_bans(stream: str, now: float) -> list[tuple[str, str]] | None:
+    """(ip, jails) fail2ban banned on this server in the last BAN_WINDOW_SECONDS.
+
+    None when ban context is off or the lookup failed (the alert still goes out)."""
+    if not BAN_LOG_GROUP:
+        return None
+    try:
+        resp = _client("logs").filter_log_events(
+            logGroupName=BAN_LOG_GROUP,
+            logStreamNames=[stream],
+            startTime=int((now - BAN_WINDOW_SECONDS) * 1000),
+            endTime=int((now + 60) * 1000),
+            filterPattern='"Ban"',
+            limit=200,
+        )
+    except Exception:  # noqa: BLE001 - context is a nice-to-have, never block the alert
+        return None
+    jails: dict[str, list[str]] = {}
+    for ev in resp.get("events", []):
+        m = _BAN.search(ev.get("message", ""))
+        if m and m["jail"] not in jails.setdefault(m["ip"], []):
+            jails[m["ip"]].append(m["jail"])
+    return [(ip, ", ".join(js)) for ip, js in jails.items()]
+
+
+def ban_line(bans: list[tuple[str, str]] | None) -> str:
+    if bans is None:
+        return ""
+    mins = max(1, BAN_WINDOW_SECONDS // 60)
+    if not bans:
+        return f"No IP was auto-banned on this server in the last {mins} min."
+    shown = ", ".join(f"`{ip}` ({jail})" for ip, jail in bans[:8])
+    more = f" and {len(bans) - 8} more" if len(bans) > 8 else ""
+    return (
+        f"Auto-banned in the last {mins} min: {shown}{more}. "
+        "Requests from these IPs are now dropped."
+    )
+
+
 def render(server: str, stream: str, groups: list[dict]) -> tuple[str, str]:
     total = sum(g["count"] for g in groups)
     sites = sorted({g["site"] for g in groups})
@@ -215,6 +261,9 @@ def render(server: str, stream: str, groups: list[dict]) -> tuple[str, str]:
         f"Each request held a PHP worker for {SLOW_SECONDS} s or more. "
         "When every worker is held, every site on the server times out."
     )
+    bans = ban_line(recent_bans(stream, time.time()))
+    if bans:
+        parts.append(bans)
     return title, "\n\n".join(parts)
 
 
@@ -289,12 +338,18 @@ def handle_pool_full(server: str, stream: str, messages: list[str]) -> dict:
     first, last = hits[0]["ts"], hits[-1]["ts"]
     when = first if first == last else f"{first} to {last}"
     title = f"PHP pool full on {server} (pool {hits[0]['pool']}, {hits[0]['n']} workers)"
+    bans = recent_bans(stream, now)
+    if bans:
+        title += f": {len(bans)} IP{'s' if len(bans) != 1 else ''} auto-banned"
     plural = "s" if len(hits) != 1 else ""
     body = (
         f"Every PHP worker was busy {len(hits)} time{plural} ({when}). New requests queue "
         "behind them; if it lasts, every site on the server times out and the uptime checks "
         "fail. The slow-request messages show what is holding the workers."
     )
+    line = ban_line(bans)
+    if line:
+        body += f"\n{line}"
     if FPM_LOG_GROUP:
         body += f"\n<{logs_link(FPM_LOG_GROUP, stream, 'max_children')}|Open in CloudWatch>"
     return {"posted": deliver(title, body), "hits": len(hits)}

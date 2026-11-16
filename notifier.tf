@@ -63,6 +63,12 @@ resource "aws_iam_role_policy" "notifier" {
           Resource = "*"
         },
       ],
+      var.ship_fail2ban ? [{
+        Sid      = "BanContext"
+        Effect   = "Allow"
+        Action   = ["logs:FilterLogEvents"]
+        Resource = [aws_cloudwatch_log_group.fail2ban[0].arn, "${aws_cloudwatch_log_group.fail2ban[0].arn}:*"]
+      }] : [],
       var.alert_topic_arn == null ? [] : [{
         Sid      = "Publish"
         Effect   = "Allow"
@@ -99,6 +105,8 @@ resource "aws_lambda_function" "notifier" {
       SLOW_SECONDS        = tostring(var.slow_seconds)
       SLOW_LOG_GROUP      = aws_cloudwatch_log_group.slow.name
       FPM_LOG_GROUP       = aws_cloudwatch_log_group.error.name
+      BAN_LOG_GROUP       = var.ship_fail2ban ? aws_cloudwatch_log_group.fail2ban[0].name : ""
+      BAN_WINDOW_SECONDS  = tostring(var.ban_window_seconds)
       DIGEST_HOURS        = tostring(var.digest_hours)
       SERVER_NAMES        = jsonencode({ for s in local.servers : s.instance_id => s.name })
     }

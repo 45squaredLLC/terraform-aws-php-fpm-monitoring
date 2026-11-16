@@ -95,3 +95,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "ship_fail2ban" {
+  description = "Also ship fail2ban's log to /<name_prefix>/fail2ban and name the IPs fail2ban banned in the last few minutes in every alert."
+  type        = bool
+  default     = false
+}
+
+variable "fail2ban_log_path" {
+  description = "fail2ban's log on the servers (used when ship_fail2ban is true)."
+  type        = string
+  default     = "/var/log/fail2ban.log"
+}
+
+variable "ban_window_seconds" {
+  description = "How far back an alert looks for fail2ban bans on the same server."
+  type        = number
+  default     = 300
+}
