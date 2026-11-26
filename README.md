@@ -52,7 +52,7 @@ and a profile whose role you pass in `instance_role_names`.
 
 ```hcl
 module "php_fpm_monitoring" {
-  source = "github.com/45squaredLLC/terraform-aws-php-fpm-monitoring?ref=v1.0.0"
+  source = "github.com/45squaredLLC/terraform-aws-php-fpm-monitoring?ref=v1.1.0"
 
   servers = {
     web1 = { instance_id = "i-0123456789abcdef0", name = "web1", php_version = "8.4" }
